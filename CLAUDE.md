@@ -17,9 +17,32 @@ via CSS variables (light/dark), Zustand (auth store), axios (interceptor JWT), j
 
 ## Status
 
-Projeto criado do zero em 01/07/2026 como scaffold inicial (MVP funcional, não testado em produção).
-`npm install` + `prisma generate` + build ainda precisam ser validados no ambiente de destino — ver
-seção "Pendências" no fim deste arquivo.
+Projeto criado do zero em 01/07/2026. **Publicado em produção no mesmo dia** (mesmo padrão
+multi-vertical do VPS Hostinger usado pelo food-system-Sas-ERP — ver `project_multi_vertical_vps.md`).
+
+**URLs de produção:**
+- Frontend: `https://sistema-moda-erp-frontend.vercel.app`
+- Backend: `https://moda-api.srv1747711.hstgr.cloud/api`
+- Login demo: `admin@modaerp.com.br` / `ModaDemo@2026` (loja "Loja Demo Moda", segmento MODA, slug `loja-demo-moda`)
+- Catálogo digital: `https://sistema-moda-erp-frontend.vercel.app/catalogo/loja-demo-moda`
+- Repo GitHub: `https://github.com/ruffinuscuritiba/sistema-moda-erp` (público — necessário para o build
+  remoto do Docker no VPS conseguir clonar sem autenticação; sem segredos reais commitados)
+
+**Infra VPS** (`/docker/moda-erp/docker-compose.yml` no host `srv1747711`):
+- `moda-postgres` (postgres:16-alpine) + `moda-backend` (build remoto do GitHub `#master:backend`)
+- **Importante**: o `context` do build usa a sintaxe `<repo>.git#<branch>:<subdir>` (não só `#<branch>`)
+  porque o `Dockerfile` do backend assume que o contexto É a pasta `backend/` (COPY sem prefixo) —
+  sem o `:backend` no fim, o build falha com "COPY prisma ./prisma/: not found" (contexto viraria a
+  raiz do monorepo). Ver `feedback_deploy_vps.md` / `project_multi_vertical_vps.md` para o padrão geral.
+- Nomes de serviço prefixados (`moda-postgres`, `moda-backend`) — nunca genéricos, por causa do bug de
+  colisão de DNS documentado no VPS quando múltiplos projetos compartilham a rede `proxy`.
+- `.env` do projeto tem `DATABASE_URL`, `JWT_SECRET`, `FRONTEND_URL` (gerados nesta sessão, valores
+  fortes aleatórios — não reutilizar em outro ambiente).
+- Sem seed script rodado em produção — a loja demo foi criada via `POST /auth/signup` real (mais
+  simples que rodar `ts-node` numa imagem de produção sem devDependencies).
+
+Local: `npm install` + `prisma generate` + build validados (ver seção "Pendências" no fim deste
+arquivo para o que falta ANTES de considerar isso pronto para clientes reais).
 
 ---
 
