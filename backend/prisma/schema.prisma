@@ -1,0 +1,373 @@
+// Sistema Moda ERP — schema multi-tenant
+// Isolamento por companyId em toda tabela de domínio (mesmo padrão comprovado do FoodSaaS ERP).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum Segment {
+  BRECHO
+  DEPARTAMENTO
+  MODA
+}
+
+enum Role {
+  ADMIN
+  MANAGER
+  SELLER
+  CASHIER
+}
+
+enum PaymentMethod {
+  CASH
+  PIX
+  CREDIT_CARD
+  DEBIT_CARD
+  STORE_CREDIT
+}
+
+enum OrderStatus {
+  PENDING
+  COMPLETED
+  CANCELLED
+}
+
+enum StockMovementType {
+  ENTRY
+  EXIT
+  SALE
+  RETURN
+  ADJUSTMENT
+  LOSS
+}
+
+enum InstallmentStatus {
+  PENDING
+  PAID
+  OVERDUE
+}
+
+enum ConditionalStatus {
+  OUT
+  RETURNED
+  CONVERTED
+  PARTIAL
+}
+
+enum ProductCondition {
+  NOVO
+  SEMINOVO
+  USADO
+  COM_DEFEITO
+}
+
+// ---------------------------------------------------------------------------
+// Tenant raiz
+// ---------------------------------------------------------------------------
+
+model Company {
+  id                  String   @id @default(cuid())
+  name                String
+  slug                String   @unique
+  segment             Segment  @default(MODA)
+  isBlocked           Boolean  @default(false)
+  subscriptionStatus  String   @default("TRIAL")
+
+  // Identidade visual (tema por loja — injetado em --color-brand no frontend)
+  primaryColor        String   @default("#6366f1")
+  secondaryColor      String   @default("#0f172a")
+  backgroundColor     String   @default("#f8fafc")
+  darkMode            Boolean  @default(false)
+  logoUrl             String?
+  bannerUrl           String?
+
+  // Layout dinâmico do catálogo digital
+  layoutType          String   @default("GRID") // GRID | LIST
+  buttonRadius        String   @default("MD")   // SM | MD | LG | FULL
+
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  users                User[]
+  categories           Category[]
+  products             Product[]
+  customers            Customer[]
+  orders               Order[]
+  stockMovements       StockMovement[]
+  installments         Installment[]
+  conditionalCheckouts ConditionalCheckout[]
+  catalogVisits        CatalogVisit[]
+}
+
+// ---------------------------------------------------------------------------
+// Usuários / equipe
+// ---------------------------------------------------------------------------
+
+model User {
+  id        String   @id @default(cuid())
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name      String
+  email     String   @unique
+  password  String
+  role      Role     @default(SELLER)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  @@index([companyId])
+}
+
+// ---------------------------------------------------------------------------
+// Catálogo
+// ---------------------------------------------------------------------------
+
+model Category {
+  id        String   @id @default(cuid())
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name      String
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+
+  products Product[]
+
+  @@index([companyId, sortOrder])
+}
+
+model Product {
+  id                String    @id @default(cuid())
+  companyId         String
+  company           Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  categoryId        String?
+  category          Category? @relation(fields: [categoryId], references: [id])
+  name              String
+  description       String?
+  sku               String?
+  imageUrl          String?
+  costPrice         Decimal   @default(0) @db.Decimal(10, 2)
+  salePrice         Decimal   @db.Decimal(10, 2)
+
+  // Módulo Brechó / Consignação
+  isConsigned       Boolean   @default(false)
+  consignorName     String?
+  consignorPhone    String?
+  commissionPercent Decimal?  @db.Decimal(5, 2)
+
+  // Estado da peça e transparência de defeitos (essencial em segunda mão)
+  condition         ProductCondition @default(NOVO)
+  defectNotes       String?          // ex: "mancha pequena na barra", "botão faltando"
+  defectPhotoUrl    String?
+
+  // Promoção / queima de estoque
+  isOnSale          Boolean   @default(false)
+  promoPrice        Decimal?  @db.Decimal(10, 2)
+  saleStartsAt      DateTime?
+  saleEndsAt        DateTime?
+
+  isActive          Boolean   @default(true)
+  sortOrder         Int       @default(0)
+  deletedAt         DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  variants   ProductVariant[]
+  orderItems OrderItem[]
+
+  @@index([companyId])
+  @@index([companyId, categoryId])
+  @@index([companyId, isOnSale])
+}
+
+// Grade bidimensional: tamanho x cor, com estoque próprio por combinação
+model ProductVariant {
+  id           String   @id @default(cuid())
+  productId    String
+  product      Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  size         String
+  color        String   @default("Único")
+  barcode      String?
+  stock        Int      @default(0)
+  minimumStock Int      @default(0)
+  createdAt    DateTime @default(now())
+
+  orderItems       OrderItem[]
+  stockMovements   StockMovement[]
+  conditionalItems ConditionalItem[]
+
+  @@unique([productId, size, color])
+}
+
+// ---------------------------------------------------------------------------
+// Clientes / crediário próprio
+// ---------------------------------------------------------------------------
+
+model Customer {
+  id            String   @id @default(cuid())
+  companyId     String
+  company       Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name          String
+  phone         String?
+  email         String?
+  cpf           String?
+  creditLimit   Decimal  @default(0) @db.Decimal(10, 2)
+  creditBalance Decimal  @default(0) @db.Decimal(10, 2)
+  createdAt     DateTime @default(now())
+
+  orders               Order[]
+  installments         Installment[]
+  conditionalCheckouts ConditionalCheckout[]
+
+  @@index([companyId])
+  @@index([companyId, phone])
+}
+
+// ---------------------------------------------------------------------------
+// Pedidos / vendas
+// ---------------------------------------------------------------------------
+
+model Order {
+  id                String        @id @default(cuid())
+  companyId         String
+  company           Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  customerId        String?
+  customer          Customer?     @relation(fields: [customerId], references: [id])
+  number            Int           @default(0)
+  status            OrderStatus   @default(PENDING)
+  paymentMethod     PaymentMethod @default(CASH)
+  subtotal          Decimal       @default(0) @db.Decimal(10, 2)
+  discount          Decimal       @default(0) @db.Decimal(10, 2)
+  total             Decimal       @default(0) @db.Decimal(10, 2)
+  installmentsCount Int           @default(1)
+  createdAt         DateTime      @default(now())
+  completedAt       DateTime?
+  cancelledAt       DateTime?
+
+  items        OrderItem[]
+  installments Installment[]
+
+  @@index([companyId, status])
+  @@index([companyId, createdAt])
+}
+
+model OrderItem {
+  id               String          @id @default(cuid())
+  orderId          String
+  order            Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId        String
+  product          Product         @relation(fields: [productId], references: [id])
+  productVariantId String
+  productVariant   ProductVariant  @relation(fields: [productVariantId], references: [id])
+  productName      String
+  size             String
+  color            String
+  unitPrice        Decimal         @db.Decimal(10, 2)
+  quantity         Int
+  subtotal         Decimal         @db.Decimal(10, 2)
+  commissionAmount Decimal?        @db.Decimal(10, 2)
+
+  @@index([orderId])
+}
+
+// ---------------------------------------------------------------------------
+// Estoque
+// ---------------------------------------------------------------------------
+
+model StockMovement {
+  id               String             @id @default(cuid())
+  companyId        String
+  company          Company            @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  productVariantId String
+  productVariant   ProductVariant     @relation(fields: [productVariantId], references: [id])
+  type             StockMovementType
+  previousStock    Int
+  currentStock     Int
+  quantity         Int
+  reason           String?
+  referenceId      String?
+  createdAt        DateTime           @default(now())
+
+  @@index([companyId, createdAt])
+  @@index([productVariantId])
+}
+
+// ---------------------------------------------------------------------------
+// Crediário próprio (parcelas)
+// ---------------------------------------------------------------------------
+
+model Installment {
+  id         String            @id @default(cuid())
+  companyId  String
+  company    Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  orderId    String
+  order      Order             @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  customerId String
+  customer   Customer          @relation(fields: [customerId], references: [id])
+  number     Int
+  amount     Decimal           @db.Decimal(10, 2)
+  dueDate    DateTime
+  paidAt     DateTime?
+  status     InstallmentStatus @default(PENDING)
+
+  @@index([companyId, status])
+  @@index([customerId])
+}
+
+// ---------------------------------------------------------------------------
+// Condicional ("leva pra provar")
+// ---------------------------------------------------------------------------
+
+model ConditionalCheckout {
+  id               String            @id @default(cuid())
+  companyId        String
+  company          Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  customerId       String
+  customer         Customer          @relation(fields: [customerId], references: [id])
+  status           ConditionalStatus @default(OUT)
+  dueAt            DateTime
+  notes            String?
+  createdAt        DateTime          @default(now())
+  returnedAt       DateTime?
+  convertedOrderId String?
+
+  items ConditionalItem[]
+
+  @@index([companyId, status])
+}
+
+model ConditionalItem {
+  id                    String              @id @default(cuid())
+  conditionalCheckoutId String
+  conditionalCheckout   ConditionalCheckout @relation(fields: [conditionalCheckoutId], references: [id], onDelete: Cascade)
+  productVariantId      String
+  productVariant        ProductVariant      @relation(fields: [productVariantId], references: [id])
+  quantity              Int
+  unitPrice             Decimal             @db.Decimal(10, 2)
+  returned              Boolean             @default(false)
+  sold                  Boolean             @default(false)
+
+  @@index([conditionalCheckoutId])
+}
+
+// ---------------------------------------------------------------------------
+// Catálogo digital — visitas (analytics leve)
+// ---------------------------------------------------------------------------
+
+model CatalogVisit {
+  id        String   @id @default(cuid())
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  referrer  String?
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  @@index([companyId, createdAt])
+}
