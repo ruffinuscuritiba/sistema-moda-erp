@@ -29,4 +29,9 @@ export class OrdersController {
   cancel(@CompanyId() companyId: string, @Param('id') id: string) {
     return this.ordersService.cancel(companyId, id);
   }
+
+  @Patch(':id/complete')
+  completePending(@CompanyId() companyId: string, @Param('id') id: string) {
+    return this.ordersService.completePending(companyId, id);
+  }
 }

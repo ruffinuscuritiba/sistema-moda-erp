@@ -15,6 +15,7 @@ import {
   Settings,
   LogOut,
   ShoppingBag,
+  MessageCircle,
 } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
 
@@ -27,6 +28,7 @@ const NAV = [
   { href: '/dashboard/condicionais', label: 'Condicionais', icon: Repeat },
   { href: '/dashboard/crediario', label: 'Crediário', icon: CreditCard },
   { href: '/dashboard/equipe', label: 'Equipe', icon: UserCog },
+  { href: '/dashboard/whatsapp-ia', label: 'WhatsApp IA', icon: MessageCircle },
   { href: '/dashboard/configuracoes', label: 'Configurações', icon: Settings },
 ];
 

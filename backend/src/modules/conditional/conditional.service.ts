@@ -24,6 +24,11 @@ export class ConditionalService {
     if (!customer) throw new NotFoundException('Cliente não encontrado.');
 
     const variantIds = dto.items.map((i) => i.productVariantId);
+    const uniqueVariantIds = new Set(variantIds);
+    if (uniqueVariantIds.size !== variantIds.length) {
+      throw new BadRequestException('Cada variante deve aparecer uma única vez no condicional.');
+    }
+
     const variants = await this.prisma.productVariant.findMany({
       where: { id: { in: variantIds }, product: { companyId } },
       include: { product: true },
@@ -99,6 +104,20 @@ export class ConditionalService {
     }
 
     const keptSet = new Set(dto.keptVariantIds);
+    if (keptSet.size !== dto.keptVariantIds.length) {
+      throw new BadRequestException('A lista de itens mantidos não pode conter duplicidades.');
+    }
+
+    const conditionalVariantIds = new Set(checkout.items.map((item) => item.productVariantId));
+    const invalidKeptIds = [...keptSet].filter((variantId) => !conditionalVariantIds.has(variantId));
+    if (invalidKeptIds.length > 0) {
+      throw new BadRequestException('Um ou mais itens mantidos não pertencem a este condicional.');
+    }
+
+    const paymentMethod = dto.paymentMethod ?? PaymentMethod.CASH;
+    if (paymentMethod === PaymentMethod.STORE_CREDIT) {
+      throw new BadRequestException('O crediário deve ser fechado pelo fluxo de venda da loja.');
+    }
 
     return this.prisma.$transaction(
       async (tx) => {
@@ -150,7 +169,7 @@ export class ConditionalService {
               customerId: checkout.customerId,
               number: (last?.number ?? 0) + 1,
               status: OrderStatus.COMPLETED,
-              paymentMethod: dto.paymentMethod ?? PaymentMethod.CASH,
+              paymentMethod,
               subtotal,
               total: subtotal,
               completedAt: new Date(),

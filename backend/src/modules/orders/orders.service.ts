@@ -32,6 +32,11 @@ export class OrdersService {
 
   async create(companyId: string, dto: CreateOrderDto) {
     const variantIds = dto.items.map((i) => i.productVariantId);
+    const uniqueVariantIds = new Set(variantIds);
+    if (uniqueVariantIds.size !== variantIds.length) {
+      throw new BadRequestException('Cada variante deve aparecer uma única vez no pedido.');
+    }
+
     const variants = await this.prisma.productVariant.findMany({
       where: { id: { in: variantIds }, product: { companyId } },
       include: { product: true },
@@ -71,10 +76,19 @@ export class OrdersService {
     const total = Math.max(0, subtotal - discount);
     const installmentsCount = dto.paymentMethod === PaymentMethod.STORE_CREDIT ? dto.installmentsCount ?? 1 : 1;
 
-    if (dto.paymentMethod === PaymentMethod.STORE_CREDIT) {
-      if (!dto.customerId) throw new BadRequestException('Venda a crediário exige um cliente identificado.');
-      const customer = await this.prisma.customer.findFirst({ where: { id: dto.customerId, companyId } });
+    let customer: { creditBalance: Prisma.Decimal; creditLimit: Prisma.Decimal } | null = null;
+    if (dto.customerId) {
+      customer = await this.prisma.customer.findFirst({
+        where: { id: dto.customerId, companyId },
+        select: { creditBalance: true, creditLimit: true },
+      });
       if (!customer) throw new NotFoundException('Cliente não encontrado.');
+    }
+
+    if (dto.paymentMethod === PaymentMethod.STORE_CREDIT) {
+      if (!dto.customerId || !customer) {
+        throw new BadRequestException('Venda a crediário exige um cliente identificado.');
+      }
 
       const projectedBalance = Number(customer.creditBalance) + total;
       if (projectedBalance > Number(customer.creditLimit)) {
@@ -120,6 +134,113 @@ export class OrdersService {
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     );
+  }
+
+  /**
+   * Checkout criado pelo assistente de WhatsApp: reserva estoque na hora (evita
+   * duas pessoas reservarem a mesma peça única) mas NÃO fecha a venda — fica
+   * PENDING até a loja confirmar presencialmente (cliente prova/paga na loja).
+   * STORE_CREDIT é rejeitado aqui: crediário próprio exige avaliação humana.
+   */
+  async createFromWhatsapp(
+    companyId: string,
+    dto: { customerId?: string; paymentMethod: PaymentMethod; items: { productVariantId: string; quantity: number }[] },
+  ) {
+    if (dto.paymentMethod === PaymentMethod.STORE_CREDIT) {
+      throw new BadRequestException('Venda a crediário precisa ser fechada na loja, não pelo WhatsApp.');
+    }
+
+    const variantIds = dto.items.map((i) => i.productVariantId);
+    const uniqueVariantIds = new Set(variantIds);
+    if (uniqueVariantIds.size !== variantIds.length) {
+      throw new BadRequestException('Cada variante deve aparecer uma única vez no pedido.');
+    }
+
+    if (dto.customerId) {
+      const customer = await this.prisma.customer.findFirst({ where: { id: dto.customerId, companyId } });
+      if (!customer) throw new NotFoundException('Cliente não encontrado.');
+    }
+
+    const variants = await this.prisma.productVariant.findMany({
+      where: { id: { in: variantIds }, product: { companyId } },
+      include: { product: true },
+    });
+
+    if (variants.length !== new Set(variantIds).size) {
+      throw new BadRequestException('Um ou mais itens do carrinho não pertencem a esta loja.');
+    }
+    const variantMap = new Map(variants.map((v) => [v.id, v]));
+
+    let subtotal = 0;
+    const lines = dto.items.map((item) => {
+      const variant = variantMap.get(item.productVariantId)!;
+      const product = variant.product;
+      const unitPrice = getEffectivePrice(product);
+      const lineSubtotal = unitPrice * item.quantity;
+      subtotal += lineSubtotal;
+
+      const commissionAmount = product.isConsigned && product.commissionPercent
+        ? Number((lineSubtotal * (Number(product.commissionPercent) / 100)).toFixed(2))
+        : null;
+
+      return {
+        productId: product.id,
+        productVariantId: variant.id,
+        productName: product.name,
+        size: variant.size,
+        color: variant.color,
+        unitPrice,
+        quantity: item.quantity,
+        subtotal: lineSubtotal,
+        commissionAmount,
+      };
+    });
+
+    const total = subtotal;
+
+    return this.prisma.$transaction(
+      async (tx) => {
+        const last = await tx.order.findFirst({ where: { companyId }, orderBy: { number: 'desc' } });
+        const number = (last?.number ?? 0) + 1;
+
+        const order = await tx.order.create({
+          data: {
+            companyId,
+            customerId: dto.customerId,
+            number,
+            status: OrderStatus.PENDING,
+            paymentMethod: dto.paymentMethod,
+            subtotal,
+            discount: 0,
+            total,
+            installmentsCount: 1,
+            items: { create: lines },
+          },
+          include: { items: true },
+        });
+
+        for (const line of lines) {
+          await this.stockService.consumeVariantTransactional(tx, companyId, line.productVariantId, line.quantity, order.id);
+        }
+
+        return order;
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+    );
+  }
+
+  /** Loja confirma presencialmente um pedido reservado pelo WhatsApp: PENDING -> COMPLETED. */
+  async completePending(companyId: string, id: string) {
+    const order = await this.prisma.order.findFirst({ where: { id, companyId } });
+    if (!order) throw new NotFoundException('Pedido não encontrado.');
+    if (order.status !== OrderStatus.PENDING) {
+      throw new BadRequestException('Somente pedidos pendentes podem ser confirmados.');
+    }
+
+    return this.prisma.order.update({
+      where: { id },
+      data: { status: OrderStatus.COMPLETED, completedAt: new Date() },
+    });
   }
 
   private async createInstallments(

@@ -14,6 +14,7 @@ import { InstallmentsModule } from './modules/installments/installments.module';
 import { ConditionalModule } from './modules/conditional/conditional.module';
 import { CatalogModule } from './modules/catalog/catalog.module';
 import { UsersModule } from './modules/users/users.module';
+import { WhatsappAiModule } from './modules/whatsapp-ai/whatsapp-ai.module';
 
 @Module({
   imports: [
@@ -31,6 +32,7 @@ import { UsersModule } from './modules/users/users.module';
     ConditionalModule,
     CatalogModule,
     UsersModule,
+    WhatsappAiModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

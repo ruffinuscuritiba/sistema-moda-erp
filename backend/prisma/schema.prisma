@@ -70,6 +70,10 @@ enum ProductCondition {
   COM_DEFEITO
 }
 
+enum WhatsappProvider {
+  EVOLUTION
+}
+
 // ---------------------------------------------------------------------------
 // Tenant raiz
 // ---------------------------------------------------------------------------
@@ -106,6 +110,7 @@ model Company {
   installments         Installment[]
   conditionalCheckouts ConditionalCheckout[]
   catalogVisits        CatalogVisit[]
+  whatsappConnections  WhatsappConnection[]
 }
 
 // ---------------------------------------------------------------------------
@@ -370,4 +375,56 @@ model CatalogVisit {
   createdAt DateTime @default(now())
 
   @@index([companyId, createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// WhatsApp IA — assistente de vendas por loja
+// ---------------------------------------------------------------------------
+
+model WhatsappConnection {
+  id           String           @id @default(cuid())
+  companyId    String
+  company      Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name         String
+  provider     WhatsappProvider @default(EVOLUTION)
+  instanceName String?          @unique
+  apiUrl       String?
+  apiToken     String?          @db.Text
+  phoneNumber  String?
+  isActive     Boolean          @default(false)
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  conversations WhatsappConversation[]
+
+  @@index([companyId])
+}
+
+model WhatsappConversation {
+  id            String             @id @default(cuid())
+  connectionId  String
+  connection    WhatsappConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  companyId     String
+  phone         String
+  customerId    String?
+  state         String             @default("inicio")
+  context       Json               @default("{}")
+  lastMessageAt DateTime           @default(now())
+  createdAt     DateTime           @default(now())
+
+  messages WhatsappMessage[]
+
+  @@unique([connectionId, phone])
+  @@index([companyId])
+}
+
+model WhatsappMessage {
+  id             String               @id @default(cuid())
+  conversationId String
+  conversation   WhatsappConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  direction      String
+  content        String               @db.Text
+  createdAt      DateTime             @default(now())
+
+  @@index([conversationId, createdAt])
 }

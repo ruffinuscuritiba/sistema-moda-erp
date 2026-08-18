@@ -18,10 +18,16 @@ interface Order {
   customer?: { name: string };
 }
 
-const STATUS_TONE: Record<string, 'success' | 'danger' | 'default'> = {
+const STATUS_TONE: Record<string, 'success' | 'danger' | 'warning' | 'default'> = {
   COMPLETED: 'success',
   CANCELLED: 'danger',
-  PENDING: 'default',
+  PENDING: 'warning',
+};
+
+const STATUS_LABEL: Record<string, string> = {
+  COMPLETED: 'Concluído',
+  CANCELLED: 'Cancelado',
+  PENDING: 'Reservado (WhatsApp)',
 };
 
 const PAYMENT_LABEL: Record<string, string> = {
@@ -48,6 +54,12 @@ export default function PedidosPage() {
   async function handleCancel(id: string) {
     if (!confirm('Cancelar este pedido? O estoque será restaurado.')) return;
     await api.patch(`/orders/${id}/cancel`);
+    load();
+  }
+
+  async function handleComplete(id: string) {
+    if (!confirm('Confirmar esta venda? Use quando o cliente já provou/pagou na loja.')) return;
+    await api.patch(`/orders/${id}/complete`);
     load();
   }
 
@@ -84,15 +96,22 @@ export default function PedidosPage() {
                 <td className="py-2.5 text-ink-muted">{PAYMENT_LABEL[o.paymentMethod]}</td>
                 <td className="py-2.5 font-medium text-ink-main">{formatCurrency(o.total)}</td>
                 <td className="py-2.5">
-                  <Badge tone={STATUS_TONE[o.status] ?? 'default'}>{o.status}</Badge>
+                  <Badge tone={STATUS_TONE[o.status] ?? 'default'}>{STATUS_LABEL[o.status] ?? o.status}</Badge>
                 </td>
                 <td className="py-2.5 text-ink-muted">{formatDate(o.createdAt)}</td>
                 <td className="py-2.5 text-right">
-                  {o.status !== 'CANCELLED' && (
-                    <button onClick={() => handleCancel(o.id)} className="text-xs text-danger hover:underline">
-                      Cancelar
-                    </button>
-                  )}
+                  <div className="flex justify-end gap-3">
+                    {o.status === 'PENDING' && (
+                      <button onClick={() => handleComplete(o.id)} className="text-xs text-success hover:underline">
+                        Confirmar
+                      </button>
+                    )}
+                    {o.status !== 'CANCELLED' && (
+                      <button onClick={() => handleCancel(o.id)} className="text-xs text-danger hover:underline">
+                        Cancelar
+                      </button>
+                    )}
+                  </div>
                 </td>
               </tr>
             ))}

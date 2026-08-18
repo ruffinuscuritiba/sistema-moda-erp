@@ -86,17 +86,19 @@ token (`src/common/decorators/company-id.decorator.ts`).
       conditional/         # "leva pra provar" — reserva e resolução
       catalog/             # catálogo público por slug + registro de visitas
       users/               # equipe (roles ADMIN/MANAGER/SELLER/CASHIER)
+      whatsapp-ai/         # assistente de vendas via WhatsApp (Evolution API) — ver seção própria
 
 /frontend
   middleware.ts          # protege /dashboard via cookie "token"
   app/
     login/ signup/       # públicas — signup em 2 passos (nicho → dados)
     dashboard/           # painel admin (layout com Sidebar)
-      produtos/ estoque/ clientes/ pedidos/ condicionais/ crediario/ equipe/ configuracoes/
+      produtos/ estoque/ clientes/ pedidos/ condicionais/ crediario/ equipe/ configuracoes/ whatsapp-ia/
     catalogo/[slug]/     # catálogo digital público, tema aplicado dinamicamente
   components/
     ui/                  # Button, Input, Card, Badge
     products/ orders/ conditional/  # modais de formulário
+    whatsapp/ConnectionQrModal.tsx  # polling de QR Code da conexão WhatsApp
     layout/Sidebar.tsx
     ThemeProvider.tsx    # aplica tema em runtime (usado no dashboard layout)
   lib/theme.ts           # applyStoreTheme() — injeta --color-brand/--radius-button/classe dark
@@ -150,6 +152,70 @@ do body (única exceção documentada: nenhuma nesta versão — diferente do Fo
 
 ---
 
+## WhatsApp IA — assistente de vendas (módulo `whatsapp-ai`)
+
+Réplica do padrão validado no food-system-Sas-ERP ("Kely"), adaptado ao domínio de moda/vestuário.
+Construído do zero nesta sessão — antes não existia nenhum código de WhatsApp no projeto.
+
+**Models** (`WhatsappConnection`/`WhatsappConversation`/`WhatsappMessage`, migration
+`20260707212723_add_whatsapp_ai`): uma `WhatsappConnection` por loja (1:N — a loja pode ter mais de
+uma, mas hoje o fluxo assume uma ativa por vez), `WhatsappConversation` por `(connectionId, phone)`
+com `context: Json` guardando o carrinho atual, `WhatsappMessage` como histórico IN/OUT usado para dar
+contexto de conversa à IA.
+
+**Servidor Evolution API compartilhado**: mesmo servidor usado pelo food-system e (no futuro) pela
+oficina — `EVOLUTION_API_URL`/`EVOLUTION_API_KEY` no `.env`. Isolamento por **prefixo obrigatório de
+instância `moda-`** (`INSTANCE_PREFIX` em `evolution-provision.service.ts`): toda criação/deleção de
+instância confere o prefixo antes de qualquer chamada destrutiva — nunca é possível mexer numa
+instância de outro projeto (`kely-...` do food-system, futura `oficina-...`) por engano.
+`instanceName = moda-{slug}-{companyId.slice(0,8)}-{timestamp36}`.
+
+**Fluxo de checkout — decisão de produto importante**: `OrdersService.create()` (venda de balcão)
+sempre marca `status: COMPLETED` e consome estoque na hora — não serve para checkout autônomo de bot.
+Por isso `createFromWhatsapp()` (método aditivo, não altera `create()`) cria o pedido como
+**`PENDING`**: reserva o estoque na hora (evita duas pessoas reservarem a mesma peça única de
+brechó) mas **não fecha a venda** — a loja confirma presencialmente quando o cliente vem provar/pagar,
+via `completePending()` (`PATCH /orders/:id/complete`, novo endpoint) ou cancela via `cancel()` já
+existente (reaproveitado sem alteração, libera a reserva). `STORE_CREDIT` é **rejeitado** em
+`createFromWhatsapp` — crediário próprio sempre exige avaliação humana na loja.
+
+**Núcleo do bot** (`whatsapp-ai.service.ts`): webhook Evolution (`POST
+/whatsapp-ai/webhook/:connectionId`, público, parse compatível v1/v2 — mesmo padrão de
+`msgData = data.messages?.[0] ?? data` documentado no food-system) → carrega/cria
+`WhatsappConversation` → injeta catálogo via `ProductsService.publicCatalog()` (reaproveitado, não
+duplicado) + carrinho persistido em `context` no prompt → chama IA (**Anthropic primário, Gemini como
+fallback automático** — mesmo padrão de confiabilidade do food-system) esperando JSON estrito
+`{resposta_cliente, carrinho, finalizar_pedido, forma_pagamento, transferir_humano}` → se
+`finalizar_pedido && carrinho.length > 0`, chama `createFromWhatsapp` e responde com o número do
+pedido. Erros em qualquer etapa (IA sem provedor configurado, Evolution fora do ar) são capturados e
+logados — o webhook sempre responde `{ok:true}` para não gerar retry infinito da Evolution API.
+
+**Env vars novas** (`.env.example` atualizado): `EVOLUTION_API_URL`, `EVOLUTION_API_KEY`,
+`BACKEND_URL` (usada para montar a URL do webhook no provisionamento), `ANTHROPIC_API_KEY` +
+`ANTHROPIC_MODEL` (default `claude-haiku-4-5-20251001`), `GEMINI_API_KEY` + `GEMINI_MODEL` (fallback,
+default `gemini-2.0-flash`). Projeto não usa `@nestjs/config` — lidas via `process.env` direto, como
+o resto do projeto já faz (`main.ts`).
+
+**Frontend**: `/dashboard/whatsapp-ia` — cria conexão, mostra modal de QR Code (polling 3s via
+`GET /connections/:id/qr` até `isActive`), lista conexões com status/telefone, botão remover. Item
+"WhatsApp IA" na sidebar (ícone `MessageCircle`). `/dashboard/pedidos` ganhou badge "Reservado
+(WhatsApp)" para `status=PENDING` + botão "Confirmar" (chama `completePending`) ao lado do
+"Cancelar" já existente.
+
+**Validado localmente nesta sessão** (Postgres throwaway em Docker, sem tocar produção/nenhum número
+real): migration aplicada, `tsc`/`nest build`/`next build` limpos, webhook simulado via curl
+(parse correto + degrada graciosamente sem crashar quando não há chave de IA configurada), e um
+script temporário (apagado após uso) validou via `OrdersService` direto: `STORE_CREDIT` rejeitado,
+reserva de estoque em `createFromWhatsapp`, `completePending` muda para `COMPLETED` e rejeita
+segunda chamada, `cancel()` restaura estoque corretamente. **Não conectado nenhum WhatsApp real** —
+fica para quando o usuário quiser escanear o QR Code de verdade.
+
+**Fora de escopo desta sessão**: réplica do mesmo padrão para Estética (vai migrar de Meta Cloud API
+para Evolution API primeiro) e Oficina (adicionar roteamento por `:connectionId` no lugar do
+`resolverOficinaAtual()` atual, que assume 1 instância global).
+
+---
+
 ## Convenções
 
 - Idioma: PT-BR em mensagens de erro e UI. Código em inglês.
@@ -162,8 +228,10 @@ do body (única exceção documentada: nenhuma nesta versão — diferente do Fo
 
 ## Pendências (antes de considerar "pronto para produção")
 
-1. **Nunca rodado**: `npm install` (backend e frontend), `npx prisma generate`,
-   `npx prisma migrate dev`, `npm run build` de ambos — validar nesta ordem antes de deploy.
+1. ~~Nunca rodado~~ **Validado localmente** (sessão do módulo WhatsApp IA): `npm install`,
+   `npx prisma generate`, `npx prisma migrate dev` e `npm run build` de ambos rodaram limpos contra
+   um Postgres throwaway em Docker. Falta ainda validar contra o Postgres real de produção do VPS
+   antes do próximo deploy (rodar `prisma migrate deploy` lá, não `migrate dev`).
 2. **CRUD de categorias na UI**: endpoints prontos (`/categories`), sem tela — hoje só existem as
    categorias criadas pelo onboarding por nicho.
 3. **Upload de imagem real**: `imageUrl`/`logoUrl`/`bannerUrl`/`defectPhotoUrl` são campos de texto
