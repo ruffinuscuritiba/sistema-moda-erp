@@ -178,6 +178,33 @@ export class SuperAdminService {
     await this.prisma.user.update({ where: { id: owner.id }, data: { password: hashedPassword } });
     return { email: owner.email };
   }
+
+  /**
+   * Gera um token de login como o dono da loja — mesmo formato de payload
+   * que o login normal (JwtStrategy espera {sub, email, companyId, role}).
+   * Usado pelo painel agregador pra "Acessar Painel" sem precisar da senha.
+   */
+  async impersonateOwner(companyId: string) {
+    const company = await this.prisma.company.findUnique({ where: { id: companyId } });
+    if (!company) throw new BadRequestException('Loja não encontrada.');
+
+    const owner = await this.prisma.user.findFirst({
+      where: { companyId, role: 'ADMIN' },
+      orderBy: { createdAt: 'asc' },
+    });
+    if (!owner) throw new BadRequestException('Nenhum usuário dono (ADMIN) encontrado nesta loja.');
+
+    const accessToken = this.jwt.sign(
+      { sub: owner.id, email: owner.email, companyId: owner.companyId, role: owner.role },
+      { expiresIn: '4h' },
+    );
+
+    return {
+      accessToken,
+      user: { id: owner.id, name: owner.name, email: owner.email, role: owner.role },
+      company: { id: company.id, name: company.name, slug: company.slug, segment: company.segment },
+    };
+  }
 }
 
 // ─── Controller ───────────────────────────────────────────────────────────
@@ -214,6 +241,12 @@ export class SuperAdminController {
   @Patch('companies/:id/reset-owner-password')
   resetOwnerPassword(@Param('id') id: string, @Body() dto: ResetOwnerPasswordDto) {
     return this.svc.resetOwnerPassword(id, dto);
+  }
+
+  @UseGuards(SuperAdminGuard)
+  @Post('companies/:id/impersonate')
+  impersonate(@Param('id') id: string) {
+    return this.svc.impersonateOwner(id);
   }
 }
 
