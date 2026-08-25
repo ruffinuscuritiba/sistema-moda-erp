@@ -8,6 +8,8 @@ import { slugify } from '../../common/utils/slugify';
 import { SignupDto } from './dto/signup.dto';
 import { LoginDto } from './dto/login.dto';
 
+const DEMO_USER_EMAIL = 'admin@modaerp.com.br';
+
 @Injectable()
 export class AuthService {
   constructor(
@@ -73,6 +75,17 @@ export class AuthService {
     const company = await this.prisma.company.findUnique({ where: { id: user.companyId } });
     if (!company) throw new UnauthorizedException('Empresa não encontrada.');
     if (company.isBlocked) throw new UnauthorizedException('Empresa bloqueada. Contate o suporte.');
+
+    return this.buildAuthResponse(user, company);
+  }
+
+  /** Ver comentário no controller — entra direto na conta demo seedada, sem senha. */
+  async demoAccess() {
+    const user = await this.prisma.user.findUnique({ where: { email: DEMO_USER_EMAIL } });
+    if (!user || !user.isActive) throw new BadRequestException('Conta de demonstração indisponível no momento.');
+
+    const company = await this.prisma.company.findUnique({ where: { id: user.companyId } });
+    if (!company) throw new BadRequestException('Empresa de demonstração indisponível no momento.');
 
     return this.buildAuthResponse(user, company);
   }
