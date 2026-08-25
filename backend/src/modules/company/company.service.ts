@@ -15,6 +15,7 @@ const SETTINGS_SELECT = {
   bannerUrl: true,
   layoutType: true,
   buttonRadius: true,
+  whatsapp: true,
 };
 
 const PUBLIC_SELECT = {
@@ -30,6 +31,7 @@ const PUBLIC_SELECT = {
   bannerUrl: true,
   layoutType: true,
   buttonRadius: true,
+  whatsapp: true,
 };
 
 @Injectable()

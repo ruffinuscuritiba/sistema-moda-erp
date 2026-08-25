@@ -93,6 +93,7 @@ model Company {
   darkMode            Boolean  @default(false)
   logoUrl             String?
   bannerUrl           String?
+  whatsapp            String?  // número (com DDI/DDD) pro botão "Comprar pelo WhatsApp" da vitrine pública — independente da conexão de bot/IA (WhatsappConnection)
 
   // Layout dinâmico do catálogo digital
   layoutType          String   @default("GRID") // GRID | LIST

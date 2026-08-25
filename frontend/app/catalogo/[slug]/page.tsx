@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import clsx from 'clsx';
-import { Tag } from 'lucide-react';
+import { MessageCircle, Tag } from 'lucide-react';
 import { api } from '@/services/api';
 import { applyStoreTheme } from '@/lib/theme';
 import { formatCurrency } from '@/lib/format';
@@ -20,6 +20,15 @@ interface CatalogCompany {
   bannerUrl?: string;
   layoutType: 'GRID' | 'LIST';
   buttonRadius: 'SM' | 'MD' | 'LG' | 'FULL';
+  whatsapp?: string;
+}
+
+// wa.me exige só dígitos (com DDI). Aceita o número salvo já formatado
+// (com +, espaço, hífen, parênteses) e limpa antes de montar o link.
+function buildWhatsappLink(rawPhone: string, productName: string, price: string) {
+  const digits = rawPhone.replace(/\D/g, '');
+  const text = encodeURIComponent(`Olá! Tenho interesse na peça "${productName}" (${price}) do catálogo online.`);
+  return `https://wa.me/${digits}?text=${text}`;
 }
 
 interface CatalogCategory {
@@ -138,13 +147,13 @@ export default function CatalogoPage() {
         ) : company.layoutType === 'LIST' ? (
           <div className="divide-y divide-line">
             {filteredProducts.map((p) => (
-              <ProductRow key={p.id} product={p} />
+              <ProductRow key={p.id} product={p} whatsapp={company.whatsapp} />
             ))}
           </div>
         ) : (
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
             {filteredProducts.map((p) => (
-              <ProductCard key={p.id} product={p} />
+              <ProductCard key={p.id} product={p} whatsapp={company.whatsapp} />
             ))}
           </div>
         )}
@@ -153,8 +162,9 @@ export default function CatalogoPage() {
   );
 }
 
-function ProductCard({ product }: { product: CatalogProduct }) {
+function ProductCard({ product, whatsapp }: { product: CatalogProduct; whatsapp?: string }) {
   const onSale = product.isOnSale && product.promoPrice;
+  const priceLabel = formatCurrency(product.effectivePrice);
   return (
     <div className="overflow-hidden rounded-lg border border-line bg-[var(--bg-surface)] shadow-card">
       <div className="relative aspect-square w-full bg-surface-main">
@@ -184,22 +194,33 @@ function ProductCard({ product }: { product: CatalogProduct }) {
           {onSale ? (
             <>
               <span className="text-xs text-ink-muted line-through">{formatCurrency(product.salePrice)}</span>
-              <span className="font-semibold text-danger">{formatCurrency(product.effectivePrice)}</span>
+              <span className="font-semibold text-danger">{priceLabel}</span>
             </>
           ) : (
-            <span className="font-semibold text-ink-main">{formatCurrency(product.effectivePrice)}</span>
+            <span className="font-semibold text-ink-main">{priceLabel}</span>
           )}
         </div>
         {product.totalStock <= 2 && product.totalStock > 0 && (
           <p className="mt-1 text-xs text-warning">Últimas peças!</p>
+        )}
+        {whatsapp && (
+          <a
+            href={buildWhatsappLink(whatsapp, product.name, priceLabel)}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="btn-shape mt-2.5 flex items-center justify-center gap-1.5 bg-[#25D366] px-3 py-2 text-xs font-semibold text-white transition hover:opacity-90"
+          >
+            <MessageCircle size={14} /> Comprar pelo WhatsApp
+          </a>
         )}
       </div>
     </div>
   );
 }
 
-function ProductRow({ product }: { product: CatalogProduct }) {
+function ProductRow({ product, whatsapp }: { product: CatalogProduct; whatsapp?: string }) {
   const onSale = product.isOnSale && product.promoPrice;
+  const priceLabel = formatCurrency(product.effectivePrice);
   return (
     <div className="flex items-center gap-4 py-4">
       <div className="h-20 w-20 shrink-0 overflow-hidden rounded-md bg-surface-main">
@@ -219,14 +240,24 @@ function ProductRow({ product }: { product: CatalogProduct }) {
           <p className="text-xs text-warning">⚠ {product.defectNotes}</p>
         )}
       </div>
-      <div className="text-right">
+      <div className="flex flex-col items-end gap-1.5">
         {onSale ? (
           <>
             <p className="text-xs text-ink-muted line-through">{formatCurrency(product.salePrice)}</p>
-            <p className="font-semibold text-danger">{formatCurrency(product.effectivePrice)}</p>
+            <p className="font-semibold text-danger">{priceLabel}</p>
           </>
         ) : (
-          <p className="font-semibold text-ink-main">{formatCurrency(product.effectivePrice)}</p>
+          <p className="font-semibold text-ink-main">{priceLabel}</p>
+        )}
+        {whatsapp && (
+          <a
+            href={buildWhatsappLink(whatsapp, product.name, priceLabel)}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="btn-shape flex items-center gap-1 bg-[#25D366] px-2.5 py-1.5 text-[11px] font-semibold text-white transition hover:opacity-90"
+          >
+            <MessageCircle size={12} /> Comprar
+          </a>
         )}
       </div>
     </div>

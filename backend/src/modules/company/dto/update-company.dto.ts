@@ -27,4 +27,7 @@ export class UpdateCompanyDto {
 
   @IsOptional() @IsIn(['SM', 'MD', 'LG', 'FULL'])
   buttonRadius?: string;
+
+  @IsOptional() @IsString()
+  whatsapp?: string;
 }
