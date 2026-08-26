@@ -3,6 +3,7 @@ import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
 import { SignupDto } from './dto/signup.dto';
 import { LoginDto } from './dto/login.dto';
+import { DemoAccessDto } from './dto/demo-access.dto';
 
 @Controller('auth')
 export class AuthController {
@@ -19,11 +20,14 @@ export class AuthController {
   }
 
   /** Auto-login público pra conta demo — usada pela página /demo do frontend
-   * (e pelo hub de demonstração do R_FoodSaaS). Sem senha: entra direto na
-   * conta "Loja Demo Moda" já seedada, sem passar pela tela de login. */
+   * (e pelo hub de demonstração do R_FoodSaaS). Sem senha: entra direto numa
+   * conta já seedada, sem passar pela tela de login. `niche` (opcional) leva
+   * pra uma demo temática dedicada (nome/cor/catálogo próprios do tipo de
+   * loja — ver DEMO_NICHES); ausente ou desconhecido cai na conta genérica
+   * "Loja Demo Moda". */
   @Throttle({ default: { limit: 20, ttl: 60_000 } })
   @Post('demo-access')
-  demoAccess() {
-    return this.authService.demoAccess();
+  demoAccess(@Body() dto: DemoAccessDto) {
+    return this.authService.demoAccess(dto.niche);
   }
 }

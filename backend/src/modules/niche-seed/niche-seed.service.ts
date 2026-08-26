@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Segment } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
-import { SEGMENT_DATA } from './niche-seed.data';
+import { SEGMENT_DATA, SeedCategory } from './niche-seed.data';
 
 /**
  * "Motor de criação" do onboarding: ao escolher o nicho no signup, popula
@@ -18,8 +18,18 @@ export class NicheSeedService {
     const existing = await this.prisma.category.count({ where: { companyId } });
     if (existing > 0) return; // idempotente — nunca duplica em re-execuções
 
-    const categories = SEGMENT_DATA[segment];
+    await this.seedCategories(companyId, SEGMENT_DATA[segment]);
+    this.logger.log(`Seed de nicho ${segment} aplicado para empresa ${companyId}.`);
+  }
 
+  /**
+   * Mesmo motor de criação acima, mas recebendo o catálogo direto — usado
+   * pelas demos temáticas do hub /demo (DEMO_NICHES em demo-niche.data.ts),
+   * que não têm um valor no enum Segment (são só vitrine, não tipo real de
+   * loja no onboarding). Caller decide a idempotência (aqui não checa
+   * `existing > 0` porque quem chama já sabe se a empresa é nova ou não).
+   */
+  async seedCategories(companyId: string, categories: SeedCategory[]): Promise<void> {
     for (let i = 0; i < categories.length; i++) {
       const cat = categories[i];
       const category = await this.prisma.category.create({
@@ -49,7 +59,5 @@ export class NicheSeedService {
         }
       }
     }
-
-    this.logger.log(`Seed de nicho ${segment} aplicado para empresa ${companyId}.`);
   }
 }
